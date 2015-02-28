@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE GADTs              #-}
 module TinyThreePassCompiler where
 
 
@@ -96,22 +95,6 @@ value = immVal <|> varVal
 
 
 ------------------------------------------------------------------------------
--- | Parses an operator
-operator :: Parser AST -> Char -> Parser AST -> Parser AST
-operator l o r = do
-  l' <- l
-  token o
-  r' <- r
-  lift $ toAST o <*> Just l' <*> Just r'
-  where
-    toAST '+' = Just Add
-    toAST '-' = Just Sub
-    toAST '*' = Just Mul
-    toAST '/' = Just Div
-    toAST _   = Nothing
-
-
-------------------------------------------------------------------------------
 -- | Parser
 pass1 :: String -> AST
 pass1 = fromJust . runParser function . tokenize
@@ -120,12 +103,14 @@ pass1 = fromJust . runParser function . tokenize
       token '[' *> argument_list <* token ']'
       expression
     argument_list = void $ many variable
-    expression    = operator term '+' expression
-                    <|> operator term '-' expression
-                    <|> term
-    term          = operator factor '*' term
-                    <|> operator factor '/' term
-                    <|> factor
+    expression    = term >>= expression'  -- left to right recursion rewrite
+    expression' l =     (token '+' *> liftM (Add l) term >>= expression')
+                    <|> (token '-' *> liftM (Sub l) term >>= expression')
+                    <|> return l
+    term          = factor >>= term'      -- left to right recursion rewrite
+    term' l       =     (token '*' *> liftM (Mul l) factor >>= term')
+                    <|> (token '/' *> liftM (Div l) factor >>= term')
+                    <|> return l
     factor        = token '(' *> expression <* token ')' <|> value
 
 
@@ -169,19 +154,30 @@ popPush :: Instruction -> [Instruction]
 popPush x = [ PO, SW, PO, x, PU ]
 
 
-transformPUPOSW :: [Instruction] -> [Instruction]
-transformPUPOSW (PU:PO:SW:t) = SW:t
-transformPUPOSW x            = x
+tPUPOSW :: [Instruction] -> [Instruction]
+tPUPOSW (PU:PO:SW:t) = SW:t
+tPUPOSW x            = x
 
 
-transformBadSW :: [Instruction] -> [Instruction]
-transformBadSW (PU:(IM x):SW:PO:t) = SW:(IM x):t
-transformBadSW (PU:(AR x):SW:PO:t) = SW:(AR x):t
-transformBadSW x                   = x
+tPU_SWPO_ :: [Instruction] -> [Instruction]
+tPU_SWPO_ (PU:(IM x):SW:PO:AD:t) = SW:(IM x):AD:t
+tPU_SWPO_ (PU:(AR x):SW:PO:MU:t) = SW:(AR x):MU:t
+tPU_SWPO_ (PU:(IM x):SW:PO:SU:t) = SW:(IM x):SW:SU:t
+tPU_SWPO_ (PU:(AR x):SW:PO:DI:t) = SW:(AR x):SW:DI:t
+tPU_SWPO_ x                      = x
+
+
+t_SW_SW :: [Instruction] -> [Instruction]
+t_SW_SW ((IM x):SW:(IM y):SW:t) = (IM y):SW:(IM x):t
+t_SW_SW ((IM x):SW:(AR y):SW:t) = (AR y):SW:(IM x):t
+t_SW_SW ((AR x):SW:(IM y):SW:t) = (IM y):SW:(AR x):t
+t_SW_SW ((AR x):SW:(AR y):SW:t) = (AR y):SW:(AR x):t
+t_SW_SW x                       = x
+
 
 
 peepHole :: [Instruction] -> [Instruction]
-peepHole = transform transformBadSW . transform transformPUPOSW
+peepHole = transform t_SW_SW . transform tPU_SWPO_ . transform tPUPOSW
 
 
 ------------------------------------------------------------------------------
