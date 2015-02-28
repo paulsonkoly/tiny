@@ -119,12 +119,34 @@ pass1 = fromJust . runParser function . tokenize
                     <|> value
 
 
+------------------------------------------------------------------------------
+-- Optimizer
 pass2 :: AST -> AST
-pass2 = undefined
+pass2 (Imm x) = Imm x
+pass2 (Arg x) = Arg x
+pass2 (Add x1 x2) = case ((pass2 x1), (pass2 x2)) of
+  (Imm a, Imm b) -> Imm $ a + b
+  (l, r)         -> Add l r
+pass2 (Sub x1 x2) = case ((pass2 x1), (pass2 x2)) of
+  (Imm a, Imm b) -> Imm $ a - b
+  (l, r)         -> Sub l r
+pass2 (Mul x1 x2) = case ((pass2 x1), (pass2 x2)) of
+  (Imm a, Imm b) -> Imm $ a * b
+  (l, r)         -> Mul l r
+pass2 (Div x1 x2) = case ((pass2 x1), (pass2 x2)) of
+  (Imm a, Imm b) -> Imm $ a `div` b
+  (l, r)         -> Div l r  
 
 
-pass3 :: AST -> [String]
-pass3 = undefined
+------------------------------------------------------------------------------
+-- Code generator
+pass3 :: AST -> [ String ]
+pass3 (Imm x) = [ "IM " ++ (show x), "PU" ]
+pass3 (Arg x) = [ "AR " ++ (show x), "PU" ]
+pass3 (Add x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "AD", "PU" ]
+pass3 (Sub x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "SU", "PU" ]
+pass3 (Mul x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "MU", "PU" ]
+pass3 (Div x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "DI", "PU" ]
 
 
 compile :: String -> [String]
