@@ -56,14 +56,6 @@ runParser p i = evalStateT p (ParserSate i 0 M.empty)
 
 
 ------------------------------------------------------------------------------
--- | token with a phantom type
-data TokenPrim a where
-  TPChar :: Char -> TokenPrim Char
-  TPInt  :: Int -> TokenPrim Int
-  TPStr  :: String -> TokenPrim String
-
-
-------------------------------------------------------------------------------
 -- | next token
 next :: Parser Token
 next = do
@@ -74,8 +66,8 @@ next = do
 
 ------------------------------------------------------------------------------
 -- | Asserts that the next token is the one we expect
-token :: TokenPrim Char -> Parser ()
-token (TPChar x) = next >>= \t -> guard $ t == TChar x
+token :: Char -> Parser ()
+token x = next >>= \t -> guard $ t == TChar x
 
 
 ------------------------------------------------------------------------------
@@ -105,20 +97,18 @@ value = immVal <|> varVal
 
 ------------------------------------------------------------------------------
 -- | Parses an operator
-operator :: Parser AST -> TokenPrim Char -> Parser AST -> Parser AST
+operator :: Parser AST -> Char -> Parser AST -> Parser AST
 operator l o r = do
   l' <- l
   token o
   r' <- r
-  return $ toAST o l' r'
-
-
-toAST :: TokenPrim Char -> (AST -> AST -> AST)
-toAST (TPChar '+') = Add
-toAST (TPChar '-') = Sub
-toAST (TPChar '*') = Mul
-toAST (TPChar '/') = Div
-toAST _            = undefined
+  lift $ toAST o <*> Just l' <*> Just r'
+  where
+    toAST '+' = Just Add
+    toAST '-' = Just Sub
+    toAST '*' = Just Mul
+    toAST '/' = Just Div
+    toAST _   = Nothing
 
 
 ------------------------------------------------------------------------------
@@ -127,17 +117,16 @@ pass1 :: String -> AST
 pass1 = fromJust . runParser function . tokenize
   where
     function      = do
-      token (TPChar '[') *> argument_list <* token (TPChar ']')
+      token '[' *> argument_list <* token ']'
       expression
     argument_list = void $ many variable
-    expression    = operator term (TPChar '+') expression
-                    <|> operator term (TPChar '-') expression
+    expression    = operator term '+' expression
+                    <|> operator term '-' expression
                     <|> term
-    term          = operator factor (TPChar '*') term
-                    <|> operator factor (TPChar '/') term
+    term          = operator factor '*' term
+                    <|> operator factor '/' term
                     <|> factor
-    factor        = token (TPChar '(') *> expression <* token (TPChar ')')
-                    <|> value
+    factor        = token '(' *> expression <* token ')' <|> value
 
 
 ------------------------------------------------------------------------------
