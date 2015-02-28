@@ -1,12 +1,13 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell    #-}
+{-# LANGUAGE GADTs              #-}
 module TinyThreePassCompiler where
 
+
+import           Control.Applicative
+import           Control.Lens
+import           Control.Monad.State
 import qualified Data.Map as M
-import Control.Monad.State
-import Data.Maybe (listToMaybe)
-import Control.Lens
-import Control.Applicative
-import Data.Maybe (fromJust)
+import           Data.Maybe (fromJust, listToMaybe)
 
 
 data AST = Imm Int
@@ -17,10 +18,12 @@ data AST = Imm Int
          | Div AST AST
          deriving (Eq, Show)
 
+
 data Token = TChar Char
            | TInt Int
            | TStr String
            deriving (Eq, Show)
+
 
 alpha, digit :: String
 alpha = ['a'..'z'] ++ ['A'..'Z']
@@ -53,6 +56,14 @@ runParser p i = evalStateT p (ParserSate i 0 M.empty)
 
 
 ------------------------------------------------------------------------------
+-- | token with a phantom type
+data TokenPrim a where
+  TPChar :: Char -> TokenPrim Char
+  TPInt  :: Int -> TokenPrim Int
+  TPStr  :: String -> TokenPrim String
+
+
+------------------------------------------------------------------------------
 -- | next token
 next :: Parser Token
 next = do
@@ -62,10 +73,9 @@ next = do
 
 
 ------------------------------------------------------------------------------
--- | Asserts that the next token is the one given
-token :: Token -> Parser ()
-token (TChar x) = next >>= \t -> guard $ t == TChar x
-token _         = undefined
+-- | Asserts that the next token is the one we expect
+token :: TokenPrim Char -> Parser ()
+token (TPChar x) = next >>= \t -> guard $ t == TChar x
 
 
 ------------------------------------------------------------------------------
@@ -95,21 +105,20 @@ value = immVal <|> varVal
 
 ------------------------------------------------------------------------------
 -- | Parses an operator
-operator :: Parser AST -> Token -> Parser AST -> Parser AST
-operator l (TChar o) r = do
+operator :: Parser AST -> TokenPrim Char -> Parser AST -> Parser AST
+operator l o r = do
   l' <- l
-  token (TChar o)
+  token o
   r' <- r
   return $ toAST o l' r'
-operator _ _ _ = undefined
 
 
-toAST :: Char -> (AST -> AST -> AST)
-toAST '+' = Add
-toAST '-' = Sub
-toAST '*' = Mul
-toAST '/' = Div
-toAST _   = undefined
+toAST :: TokenPrim Char -> (AST -> AST -> AST)
+toAST (TPChar '+') = Add
+toAST (TPChar '-') = Sub
+toAST (TPChar '*') = Mul
+toAST (TPChar '/') = Div
+toAST _            = undefined
 
 
 ------------------------------------------------------------------------------
@@ -118,16 +127,16 @@ pass1 :: String -> AST
 pass1 = fromJust . runParser function . tokenize
   where
     function      = do
-      token (TChar '[') *> argument_list <* token (TChar ']')
+      token (TPChar '[') *> argument_list <* token (TPChar ']')
       expression
     argument_list = void $ many variable
-    expression    = operator term (TChar '+') expression
-                    <|> operator term (TChar '-') expression
+    expression    = operator term (TPChar '+') expression
+                    <|> operator term (TPChar '-') expression
                     <|> term
-    term          = operator factor (TChar '*') term
-                    <|> operator factor (TChar '/') term
+    term          = operator factor (TPChar '*') term
+                    <|> operator factor (TPChar '/') term
                     <|> factor
-    factor        = token (TChar '(') *> expression <* token (TChar ')')
+    factor        = token (TPChar '(') *> expression <* token (TPChar ')')
                     <|> value
 
 
