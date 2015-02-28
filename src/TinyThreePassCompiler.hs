@@ -4,11 +4,10 @@ module TinyThreePassCompiler where
 import qualified Data.Map as M
 import Control.Monad.State
 import Data.Maybe (listToMaybe)
-import Control.Lens hiding (transform, plate)
+import Control.Lens
 import Control.Applicative
 import Data.Maybe (fromJust)
-import Data.Generics.Uniplate.Operations
-import Data.Generics.Uniplate.Direct
+
 
 data AST = Imm Int
          | Arg Int
@@ -132,15 +131,14 @@ pass1 = fromJust . runParser function . tokenize
                     <|> value
 
 
+------------------------------------------------------------------------------
+instance Plated AST where
+  plate f (Add x y) = Add <$> f x <*> f y
+  plate f (Sub x y) = Sub <$> f x <*> f y 
+  plate f (Mul x y) = Mul <$> f x <*> f y 
+  plate f (Div x y) = Div <$> f x <*> f y
+  plate _ x         = pure x
 
-instance Uniplate AST where
-  uniplate (Imm x) = plate Imm |- x
-  uniplate (Arg x) = plate Arg |- x
-  uniplate (Add x y) = plate Add |* x |* y
-  uniplate (Sub x y) = plate Sub |* x |* y 
-  uniplate (Mul x y) = plate Mul |* x |* y 
-  uniplate (Div x y) = plate Div |* x |* y
-  
 
 ------------------------------------------------------------------------------
 -- | Simplifier
@@ -160,22 +158,6 @@ data Instruction = IM Int
                  | PU | PO | SW | AD | SU | MU | DI deriving (Eq, Show)
 
 
-class Match a where
-  match :: a -> a -> Bool
-
-
-instance Match Instruction where
-  match (IM _) (IM _) = True
-  match (IM _) (AR _) = True
-  match (AR _) (IM _) = True
-  match (AR _) (AR _) = True  
-  match  x y          = x == y
-
-
-instance Match a => Match [a] where
-  match a b = and $ zipWith match a b
-
-
 generate :: AST -> [ Instruction ]
 generate (Imm x) = [ IM x, PU ]
 generate (Arg x) = [ AR x, PU ]
@@ -189,17 +171,19 @@ popPush :: Instruction -> [Instruction]
 popPush x = [ PO, SW, PO, x, PU ]
 
 
-replace :: Match t => [t] -> ([t] -> [t]) -> [t] -> [t]
-replace _ _ [] = []
-replace old rw l@(x:xs)
-  | old `match` l = let (a, b) = splitAt (length old) l
-                    in (rw a) ++ replace old rw b
-  | otherwise     = x:(replace old rw xs)
+transformPUPOSW :: [Instruction] -> [Instruction]
+transformPUPOSW (PU:PO:SW:t) = SW:t
+transformPUPOSW x            = x
+
+
+transformBadSW :: [Instruction] -> [Instruction]
+transformBadSW (PU:(IM x):SW:PO:t) = SW:(IM x):t
+transformBadSW (PU:(AR x):SW:PO:t) = SW:(AR x):t
+transformBadSW x                   = x
 
 
 peepHole :: [Instruction] -> [Instruction]
-peepHole = replace [ PU, IM undefined, SW, PO] (\t -> [SW, t !! 1])
-           . replace [ PU, PO, SW ] (const [ SW ])
+peepHole = transform transformBadSW . transform transformPUPOSW
 
 
 ------------------------------------------------------------------------------
@@ -210,4 +194,3 @@ pass3 = map show . peepHole . init . generate
 
 compile :: String -> [String]
 compile = pass3 . pass2 . pass1
-
