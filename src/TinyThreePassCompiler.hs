@@ -4,11 +4,11 @@ module TinyThreePassCompiler where
 import qualified Data.Map as M
 import Control.Monad.State
 import Data.Maybe (listToMaybe)
-import Control.Lens
+import Control.Lens hiding (transform, plate)
 import Control.Applicative
 import Data.Maybe (fromJust)
-import Data.List (isPrefixOf, (!!))
-
+import Data.Generics.Uniplate.Operations
+import Data.Generics.Uniplate.Direct
 
 data AST = Imm Int
          | Arg Int
@@ -40,7 +40,7 @@ tokenize xxs@(c:cs)
 
 
 ------------------------------------------------------------------------------
--- | Parser.
+-- | Parser state
 data ParserSate = ParserSate { _input     :: [ Token ]
                              , _pos       :: Int
                              , _variables :: M.Map String Int
@@ -53,6 +53,8 @@ runParser :: Parser a -> [Token] -> Maybe a
 runParser p i = evalStateT p (ParserSate i 0 M.empty)
 
 
+------------------------------------------------------------------------------
+-- | next token
 next :: Parser Token
 next = do
   t <- liftM listToMaybe $ use input
@@ -60,11 +62,15 @@ next = do
   lift t
 
 
+------------------------------------------------------------------------------
+-- | Asserts that the next token is the one given
 token :: Token -> Parser ()
 token (TChar x) = next >>= \t -> guard $ t == TChar x
 token _         = undefined
 
 
+------------------------------------------------------------------------------
+-- | Reads a variable name and creates the symbol table entry
 variable :: Parser ()
 variable = next >>= \t -> case t of
   (TStr name) -> do
@@ -73,6 +79,8 @@ variable = next >>= \t -> case t of
   _           -> mzero
 
 
+------------------------------------------------------------------------------
+-- | Parses a single value either immediate or a variable reference
 value :: Parser AST
 value = immVal <|> varVal
   where
@@ -86,6 +94,8 @@ value = immVal <|> varVal
       _           -> mzero
 
 
+------------------------------------------------------------------------------
+-- | Parses an operator
 operator :: Parser AST -> Token -> Parser AST -> Parser AST
 operator l (TChar o) r = do
   l' <- l
@@ -103,6 +113,8 @@ toAST '/' = Div
 toAST _   = undefined
 
 
+------------------------------------------------------------------------------
+-- | Parser
 pass1 :: String -> AST
 pass1 = fromJust . runParser function . tokenize
   where
@@ -120,27 +132,26 @@ pass1 = fromJust . runParser function . tokenize
                     <|> value
 
 
+
+instance Uniplate AST where
+  uniplate (Imm x) = plate Imm |- x
+  uniplate (Arg x) = plate Arg |- x
+  uniplate (Add x y) = plate Add |* x |* y
+  uniplate (Sub x y) = plate Sub |* x |* y 
+  uniplate (Mul x y) = plate Mul |* x |* y 
+  uniplate (Div x y) = plate Div |* x |* y
+  
+
 ------------------------------------------------------------------------------
--- Optimizer
+-- | Simplifier
 pass2 :: AST -> AST
-pass2 (Imm x) = Imm x
-pass2 (Arg x) = Arg x
-pass2 (Add x1 x2) = case ((pass2 x1), (pass2 x2)) of
-  (Imm a, Imm b) -> Imm $ a + b
-  (l, r)         -> Add l r
-pass2 (Sub x1 x2) = case ((pass2 x1), (pass2 x2)) of
-  (Imm a, Imm b) -> Imm $ a - b
-  (l, r)         -> Sub l r
-pass2 (Mul x1 x2) = case ((pass2 x1), (pass2 x2)) of
-  (Imm a, Imm b) -> Imm $ a * b
-  (l, r)         -> Mul l r
-pass2 (Div x1 x2) = case ((pass2 x1), (pass2 x2)) of
-  (Imm a, Imm b) -> Imm $ a `div` b
-  (l, r)         -> Div l r  
+pass2 = transform f
+  where f (Add (Imm a) (Imm b)) = Imm $ a + b
+        f (Sub (Imm a) (Imm b)) = Imm $ a - b
+        f (Mul (Imm a) (Imm b)) = Imm $ a * b
+        f (Div (Imm a) (Imm b)) = Imm $ a `div` b
+        f x = x        
 
-
-------------------------------------------------------------------------------
--- Code generator
 
 ------------------------------------------------------------------------------
 -- | Intruction set
@@ -190,6 +201,9 @@ peepHole :: [Instruction] -> [Instruction]
 peepHole = replace [ PU, IM undefined, SW, PO] (\t -> [SW, t !! 1])
            . replace [ PU, PO, SW ] (const [ SW ])
 
+
+------------------------------------------------------------------------------
+-- | Code generator
 pass3 :: AST -> [ String ]
 pass3 = map show . peepHole . init . generate
 
