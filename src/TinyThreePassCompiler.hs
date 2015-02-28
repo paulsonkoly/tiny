@@ -7,6 +7,7 @@ import Data.Maybe (listToMaybe)
 import Control.Lens
 import Control.Applicative
 import Data.Maybe (fromJust)
+import Data.List (isPrefixOf, (!!))
 
 
 data AST = Imm Int
@@ -140,13 +141,57 @@ pass2 (Div x1 x2) = case ((pass2 x1), (pass2 x2)) of
 
 ------------------------------------------------------------------------------
 -- Code generator
+
+------------------------------------------------------------------------------
+-- | Intruction set
+data Instruction = IM Int
+                 | AR Int
+                 | PU | PO | SW | AD | SU | MU | DI deriving (Eq, Show)
+
+
+class Match a where
+  match :: a -> a -> Bool
+
+
+instance Match Instruction where
+  match (IM _) (IM _) = True
+  match (IM _) (AR _) = True
+  match (AR _) (IM _) = True
+  match (AR _) (AR _) = True  
+  match  x y          = x == y
+
+
+instance Match a => Match [a] where
+  match a b = and $ zipWith match a b
+
+
+generate :: AST -> [ Instruction ]
+generate (Imm x) = [ IM x, PU ]
+generate (Arg x) = [ AR x, PU ]
+generate (Add x1 x2) = (generate x1) ++ (generate x2) ++ popPush AD
+generate (Sub x1 x2) = (generate x1) ++ (generate x2) ++ popPush SU
+generate (Mul x1 x2) = (generate x1) ++ (generate x2) ++ popPush MU
+generate (Div x1 x2) = (generate x1) ++ (generate x2) ++ popPush DI
+
+
+popPush :: Instruction -> [Instruction]
+popPush x = [ PO, SW, PO, x, PU ]
+
+
+replace :: Match t => [t] -> ([t] -> [t]) -> [t] -> [t]
+replace _ _ [] = []
+replace old rw l@(x:xs)
+  | old `match` l = let (a, b) = splitAt (length old) l
+                    in (rw a) ++ replace old rw b
+  | otherwise     = x:(replace old rw xs)
+
+
+peepHole :: [Instruction] -> [Instruction]
+peepHole = replace [ PU, IM undefined, SW, PO] (\t -> [SW, t !! 1])
+           . replace [ PU, PO, SW ] (const [ SW ])
+
 pass3 :: AST -> [ String ]
-pass3 (Imm x) = [ "IM " ++ (show x), "PU" ]
-pass3 (Arg x) = [ "AR " ++ (show x), "PU" ]
-pass3 (Add x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "AD", "PU" ]
-pass3 (Sub x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "SU", "PU" ]
-pass3 (Mul x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "MU", "PU" ]
-pass3 (Div x1 x2) = (pass3 x1) ++ (pass3 x2) ++ [ "PO", "SW", "PO", "DI", "PU" ]
+pass3 = map show . peepHole . init . generate
 
 
 compile :: String -> [String]
