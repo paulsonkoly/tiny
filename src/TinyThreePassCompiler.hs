@@ -154,17 +154,19 @@ popPush :: Instruction -> [Instruction]
 popPush x = [ PO, SW, PO, x, PU ]
 
 
-tPUPOSW :: [Instruction] -> [Instruction]
-tPUPOSW (PU:PO:SW:t) = SW:t
-tPUPOSW x            = x
+tPUPO :: [Instruction] -> [Instruction]
+tPUPO (PU:PO:t) = t
+tPUPO x         = x
 
 
 tPU_SWPO_ :: [Instruction] -> [Instruction]
-tPU_SWPO_ (PU:(IM x):SW:PO:AD:t) = SW:(IM x):AD:t
-tPU_SWPO_ (PU:(AR x):SW:PO:MU:t) = SW:(AR x):MU:t
-tPU_SWPO_ (PU:(IM x):SW:PO:SU:t) = SW:(IM x):SW:SU:t
-tPU_SWPO_ (PU:(AR x):SW:PO:DI:t) = SW:(AR x):SW:DI:t
-tPU_SWPO_ x                      = x
+tPU_SWPO_ z@(PU:(IM x):SW:PO:y:t) | y `elem` [AD, MU] = SW:(IM x):y:t
+                                  | y `elem` [SU, DI] = SW:(IM x):SW:y:t
+                                  | otherwise         = z
+tPU_SWPO_ z@(PU:(AR x):SW:PO:y:t) | y `elem` [AD, MU] = SW:(AR x):y:t
+                                  | y `elem` [SU, DI] = SW:(AR x):SW:y:t
+                                  | otherwise         = z                                                   
+tPU_SWPO_ x                       = x
 
 
 t_SW_SW :: [Instruction] -> [Instruction]
@@ -177,7 +179,7 @@ t_SW_SW x                       = x
 
 
 peepHole :: [Instruction] -> [Instruction]
-peepHole = transform t_SW_SW . transform tPU_SWPO_ . transform tPUPOSW
+peepHole = transform t_SW_SW . transform tPU_SWPO_ . transform tPUPO
 
 
 ------------------------------------------------------------------------------
