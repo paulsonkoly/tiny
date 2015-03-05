@@ -144,10 +144,10 @@ data Instruction = IM Int
 generate :: AST -> [ Instruction ]
 generate (Imm x) = [ IM x, PU ]
 generate (Arg x) = [ AR x, PU ]
-generate (Add x1 x2) = (generate x1) ++ (generate x2) ++ popPush AD
-generate (Sub x1 x2) = (generate x1) ++ (generate x2) ++ popPush SU
-generate (Mul x1 x2) = (generate x1) ++ (generate x2) ++ popPush MU
-generate (Div x1 x2) = (generate x1) ++ (generate x2) ++ popPush DI
+generate (Add x1 x2) = generate x1 ++ generate x2 ++ popPush AD
+generate (Sub x1 x2) = generate x1 ++ generate x2 ++ popPush SU
+generate (Mul x1 x2) = generate x1 ++ generate x2 ++ popPush MU
+generate (Div x1 x2) = generate x1 ++ generate x2 ++ popPush DI
 
 
 popPush :: Instruction -> [Instruction]
@@ -160,21 +160,21 @@ tPUPO x         = x
 
 
 tPU_SWPO_ :: [Instruction] -> [Instruction]
-tPU_SWPO_ z@(PU:(IM x):SW:PO:y:t) | y `elem` [AD, MU] = SW:(IM x):y:t
-                                  | y `elem` [SU, DI] = SW:(IM x):SW:y:t
-                                  | otherwise         = z
-tPU_SWPO_ z@(PU:(AR x):SW:PO:y:t) | y `elem` [AD, MU] = SW:(AR x):y:t
-                                  | y `elem` [SU, DI] = SW:(AR x):SW:y:t
-                                  | otherwise         = z                                                   
-tPU_SWPO_ x                       = x
+tPU_SWPO_ z@(PU:IM x:SW:PO:y:t) | y `elem` [AD, MU] = SW:IM x:y:t
+                                | y `elem` [SU, DI] = SW:IM x:SW:y:t
+                                | otherwise         = z
+tPU_SWPO_ z@(PU:AR x:SW:PO:y:t) | y `elem` [AD, MU] = SW:AR x:y:t
+                                | y `elem` [SU, DI] = SW:AR x:SW:y:t
+                                | otherwise         = z                                                   
+tPU_SWPO_ x                     = x
 
 
 t_SW_SW :: [Instruction] -> [Instruction]
-t_SW_SW ((IM x):SW:(IM y):SW:t) = (IM y):SW:(IM x):t
-t_SW_SW ((IM x):SW:(AR y):SW:t) = (AR y):SW:(IM x):t
-t_SW_SW ((AR x):SW:(IM y):SW:t) = (IM y):SW:(AR x):t
-t_SW_SW ((AR x):SW:(AR y):SW:t) = (AR y):SW:(AR x):t
-t_SW_SW x                       = x
+t_SW_SW (IM x:SW:IM y:SW:t) = IM y:SW:IM x:t
+t_SW_SW (IM x:SW:AR y:SW:t) = AR y:SW:IM x:t
+t_SW_SW (AR x:SW:IM y:SW:t) = IM y:SW:AR x:t
+t_SW_SW (AR x:SW:AR y:SW:t) = AR y:SW:AR x:t
+t_SW_SW x                   = x
 
 
 
